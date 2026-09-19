@@ -2,9 +2,9 @@
 
 插件版使用官方 **Sub2API v0.2.7** 的 `.s2plugin` 接口。基础功能无需修改宿主；**显示账号名称和选择 IP 管理中的代理**需要额外安装[资源目录适配](plugin-host-directory.md)。它与本仓库基于 v0.2.6 的增量版、完整部署版是三个可选入口，**选择一种即可**。
 
-- 下载：[插件版 v0.3.2](https://github.com/wangyunjeff/sub2api-state-kit/releases/tag/v0.3.2)
-- 安装文件：`sub2api-state-kit_plugin_v0.3.2.s2plugin`
-- 完整插件源码：`sub2api-state-kit_plugin_v0.3.2_source.zip`，或本仓库的 [`plugin/`](../plugin/)
+- 下载：[极速蹬维护版 v0.3.3-jisudeng.1](https://github.com/tqytwe/sub2api-state-kit/releases/tag/v0.3.3-jisudeng.1)
+- 安装文件：`sub2api-state-kit_plugin_v0.3.3-jisudeng.1.s2plugin`
+- 完整插件源码：`sub2api-state-kit_plugin_v0.3.3-jisudeng.1_source.zip`，或本仓库的 [`plugin/`](../plugin/)
 - 包含 Linux amd64、Linux arm64、macOS arm64 三个运行时；宿主自动选择对应架构。
 - 官方接口基线：[v0.2.7 / aea725f](https://github.com/Wei-Shaw/sub2api/tree/aea725f2ea644d5592d0bbb1d63b607efa7e200a)。清单兼容范围为 `>=0.2.7 <0.3.0`，实际验证基线为 0.2.7，其他版本仍需测试。
 
@@ -31,7 +31,7 @@
 
 ### 1. 配置信任公钥
 
-官方只内置信任它自己的插件发布者。第三方插件必须在宿主 `config.yaml` 中追加发布者公钥，**只需配置一次**。下载 Release 中的 `trusted-publisher.yaml`，把其中 `plugins.trusted_publishers.state-kit-release-v1` 合并到原配置中；不要用整个示例覆盖自己的数据库、Redis 或其他设置。
+官方只内置信任它自己的插件发布者。第三方插件必须在宿主 `config.yaml` 中追加发布者公钥，**只需配置一次**。下载 Release 中的 `trusted-publisher.yaml`，把其中 `plugins.trusted_publishers.jisudeng-state-kit-release-v1` 合并到原配置中；不要用整个示例覆盖自己的数据库、Redis 或其他设置。
 
 公钥也在仓库的 [`publisher-public-key.txt`](../plugin/release/publisher-public-key.txt) 中。公钥可以公开，它不是 API Key 或代理密码。不要开启 `allow_unsigned`。
 
@@ -118,7 +118,7 @@ node --test ui-tests/*.test.cjs
 python3 scripts/package_plugin.py build \
   --private-key /PRIVATE/PATH/publisher.pem --output ./artifacts
 python3 scripts/package_plugin.py verify \
-  --package ./artifacts/sub2api-state-kit_plugin_v0.3.2.s2plugin
+  --package ./artifacts/sub2api-state-kit_plugin_v0.3.3-jisudeng.1.s2plugin
 ```
 
 测试覆盖范围与实际结果见 [插件验证记录](plugin-validation.md)。安装包不含作者的账号、代理凭据、API Key、数据库、STATE 或签名私钥。

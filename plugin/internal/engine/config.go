@@ -13,8 +13,8 @@ import (
 	"strings"
 )
 
-const PluginID = "io.github.wangyunjeff.sub2api-state-kit"
-const Version = "0.3.2"
+const PluginID = "com.jisudeng.sub2api-state-kit"
+const Version = "0.3.3-jisudeng.1"
 const StateHeader = "x-codex-turn-state"
 const namespace = "state-kit-v1"
 

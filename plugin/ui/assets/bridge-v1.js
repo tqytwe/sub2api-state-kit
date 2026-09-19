@@ -2,7 +2,11 @@
   'use strict';
   const pending = new Map();
   const responseTypes = new Set(['config.load', 'config.save', 'config.test', 'plugin.status']);
-  const token = new URLSearchParams(global.location.hash.slice(1)).get('bridge_token');
+  const fragment = new URLSearchParams(global.location.hash.slice(1));
+  const token = fragment.get('bridge_token');
+  const i18n = global.Sub2APIPluginI18n;
+  const locale = i18n ? i18n.localeFromHash(global.location.hash) : 'zh';
+  const text = function (key) { return i18n ? i18n.t(locale, key) : key; };
   let origin = '';
   let closed = false;
   let sequence = 0;
@@ -12,8 +16,8 @@
   } catch (_) { /* A malformed parent URL must fail closed. */ }
 
   function assertReady() {
-    if (closed) throw new Error('插件配置页已关闭。');
-    if (!token || !origin || global.parent === global) throw new Error('请从 Sub2API 插件配置页打开此页面。');
+    if (closed) throw new Error(text('bridgeClosed'));
+    if (!token || !origin || global.parent === global) throw new Error(text('bridgeOpenFromHost'));
   }
   function send(type, payload) {
     assertReady();
@@ -22,7 +26,7 @@
     }), origin);
   }
   function request(type, payload, timeoutMs) {
-    if (!responseTypes.has(type)) return Promise.reject(new Error('不支持的 Bridge 方法。'));
+    if (!responseTypes.has(type)) return Promise.reject(new Error(text('bridgeUnsupported')));
     return new Promise(function (resolve, reject) {
       let id;
       try {
@@ -32,7 +36,7 @@
         id = Array.from(bytes, function (n) { return n.toString(16); }).join('-') + '-' + (++sequence);
         const timer = global.setTimeout(function () {
           pending.delete(id);
-          reject(new Error('宿主响应超时，请重试；保存操作请重新打开配置页核对结果。'));
+          reject(new Error(text('bridgeTimeout')));
         }, timeoutMs || 20000);
         pending.set(id, { type: type, resolve: resolve, reject: reject, timer: timer });
         send(type, Object.assign({}, payload, { request_id: id }));
@@ -53,7 +57,7 @@
     pending.delete(data.request_id);
     global.clearTimeout(item.timer);
     if (data.ok === true) item.resolve(data);
-    else item.reject(new Error(typeof data.error === 'string' ? data.error : (data.result && typeof data.result.message === 'string' ? data.result.message : '宿主未完成操作，请核对配置。')));
+    else item.reject(new Error(text('bridgeFailed')));
   }
   function dispose() {
     if (closed) return;
@@ -62,7 +66,7 @@
     global.removeEventListener('pagehide', dispose);
     pending.forEach(function (item) {
       global.clearTimeout(item.timer);
-      item.reject(new Error('插件配置页已关闭。'));
+      item.reject(new Error(text('bridgeClosed')));
     });
     pending.clear();
   }
