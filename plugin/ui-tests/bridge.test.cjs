@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../ui/assets/bridge-v1.js'), 'utf8');
+const i18nSource = fs.readFileSync(path.join(__dirname, '../ui/assets/i18n.js'), 'utf8');
 
 function harness(overrides = {}) {
   const listeners = new Map();
@@ -22,6 +23,7 @@ function harness(overrides = {}) {
     removeEventListener: (type, fn) => { if (listeners.get(type) === fn) listeners.delete(type); },
     ...overrides,
   };
+  vm.runInNewContext(i18nSource, { window, URLSearchParams });
   vm.runInNewContext(source, { window, URL, URLSearchParams, Uint32Array });
   function respond(index = posted.length - 1, overrides = {}, eventOverrides = {}) {
     const request = posted[index].data;
@@ -64,6 +66,15 @@ test('bridge requests time out and remove pending requests', async () => {
   h.bridge.dispose();
 });
 
+test('bridge errors use the locale passed by the host fragment', async () => {
+  const h = harness({ location: { hash: '#bridge_token=private-bridge-token&locale=en', href: 'https://sub2.example/api/v1/plugin-ui/asset/index.html' } });
+  const promise = h.bridge.status();
+  const rejected = assert.rejects(promise, /Host response timed out/);
+  for (const [id, callback] of h.timers) { h.timers.delete(id); callback(); }
+  await rejected;
+  h.bridge.dispose();
+});
+
 test('pagehide rejects pending work and removes event listeners and timers', async () => {
   const h = harness();
   const promise = h.bridge.save({ enabled: false });
@@ -99,7 +110,7 @@ test('bridge rejects missing token and refuses non-web parent origin', async () 
 test('failed host response is surfaced without treating it as successful config', async () => {
   const h = harness();
   const promise = h.bridge.test();
-  const rejected = assert.rejects(promise, /未初始化/);
+  const rejected = assert.rejects(promise, /未完成操作/);
   h.respond(0, { ok: false, result: { message: '宿主未初始化' } });
   await rejected;
   h.bridge.dispose();

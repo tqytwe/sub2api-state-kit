@@ -1,7 +1,10 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const ui = require('../ui/assets/app.js');
+const i18n = require('../ui/assets/i18n.js');
 
 function configured(overrides = {}) {
   return { ...ui.DEFAULT_CONFIG, accounts: [{ account_id: 7, enabled: false, plan: 'pro', models: ['gpt-6-astra'] }], ...overrides };
@@ -12,6 +15,41 @@ test('empty configuration and newly imported accounts default off', () => {
   assert.equal(ui.normalizeConfig({ accounts: [{ account_id: 7 }] }).accounts[0].enabled, false);
   assert.equal(ui.normalizeConfig({ accounts: [{ account_id: 7 }] }).accounts[0].plan, 'pro');
   assert.equal(ui.validateConfig(configured()).enabled, false);
+});
+
+test('locale resolution is explicit and unknown locales fall back to Chinese', () => {
+  assert.equal(i18n.localeFromHash('#bridge_token=secret&locale=en'), 'en');
+  assert.equal(i18n.localeFromHash('#locale=zh-CN'), 'zh');
+  assert.equal(i18n.localeFromHash('#locale=fr'), 'zh');
+  assert.equal(i18n.localeFromHash(''), 'zh');
+});
+
+test('English locale covers every Chinese key without leaking Han characters', () => {
+  assert.deepEqual(Object.keys(i18n.messages.zh).sort(), Object.keys(i18n.messages.en).sort());
+  for (const key of Object.keys(i18n.messages.en)) {
+    assert.doesNotMatch(i18n.t('en', key), /[\u3400-\u9fff]/, key);
+  }
+  assert.equal(i18n.t('en', 'unknown.key'), 'unknown.key');
+});
+
+test('UI templates use declared locale keys and contain no hardcoded Chinese copy', () => {
+  const uiRoot = path.join(__dirname, '../ui');
+  const html = fs.readFileSync(path.join(uiRoot, 'index.html'), 'utf8');
+  const runtime = fs.readFileSync(path.join(uiRoot, 'assets/app.js'), 'utf8');
+  const bridge = fs.readFileSync(path.join(uiRoot, 'assets/bridge-v1.js'), 'utf8');
+  const keys = Array.from(html.matchAll(/data-i18n(?:-placeholder)?="([A-Za-z0-9]+)"/g), match => match[1]);
+  assert.ok(keys.length > 40);
+  for (const key of keys) assert.ok(Object.hasOwn(i18n.messages.zh, key), key);
+  assert.doesNotMatch(html + runtime + bridge, /[\u3400-\u9fff]/);
+});
+
+test('validation, status and time output honor the selected locale', () => {
+  const config = configured({ enabled: true }); config.accounts[0].enabled = true;
+  assert.throws(() => ui.validateConfig(config, 'en'), /dynamic proxy URL/i);
+  assert.deepEqual(ui.stateLabel('ready', 'en'), ['Ready', 'success']);
+  assert.equal(ui.errorLabel('upstream_rate_limited', 'en'), 'Upstream rate limited (429)');
+  assert.equal(ui.remainingText(127, 'en'), '2 min 7 sec');
+  assert.throws(() => ui.parseStatus({ status_json: 'broken{' }, 'en'), /invalid status payload/i);
 });
 
 test('requires dynamic proxy only when global and account switches are both on', () => {
@@ -71,12 +109,12 @@ class Node {
   click() { return this.fire('click'); }
 }
 
-function uiHarness() {
+function uiHarness(locale = 'zh') {
   const elements = new Map();
   const calls = { load: 0, save: [], test: 0, status: 0, dispose: 0 };
   const timers = new Map();
   const document = { getElementById: id => { if (!elements.has(id)) elements.set(id, new Node('div')); return elements.get(id); },
-    createElement: tag => new Node(tag), documentElement: { scrollHeight: 900 }, body: new Node('body'), visibilityState: 'visible' };
+    createElement: tag => new Node(tag), querySelectorAll: () => [], title: '', documentElement: { scrollHeight: 900, lang: '' }, body: new Node('body'), visibilityState: 'visible' };
   const config = configured();
   let status = { host_ready: true, account_ids: [7, 12], tickets: [{ account_id: 7, plan: 'pro', model: 'gpt-6-astra', state: 'ready', remaining_seconds: 600, attempts: 1 }] };
   const bridge = { ready() {}, resize() {}, dispose() { calls.dispose++; },
@@ -84,11 +122,24 @@ function uiHarness() {
     async save(value) { calls.save.push(value); return { config: value }; },
     async test() { calls.test++; return { result: { message: '检查通过' } }; },
     async status() { calls.status++; return { result: { status_json: JSON.stringify(status) } }; } };
-  const global = { document, Sub2APIPluginBridge: bridge, setInterval: fn => { timers.set(1, fn); return 1; }, clearInterval: id => timers.delete(id), addEventListener() {}, removeEventListener() {} };
+  const global = { document, location: { hash: '#locale=' + locale }, Sub2APIPluginBridge: bridge, setInterval: fn => { timers.set(1, fn); return 1; }, clearInterval: id => timers.delete(id), addEventListener() {}, removeEventListener() {} };
   const runtime = ui.start(global);
   return { elements, get: document.getElementById, calls, timers, runtime, setStatus: value => { status = value; } };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('English runtime rendering does not expose Chinese host messages', async () => {
+  const h = uiHarness('en');
+  h.setStatus({ host_ready: true, message: '插件进程运行中', account_ids: [7], tickets: [{ account_id: 7, plan: 'pro', model: 'gpt-6-astra', state: 'ready', remaining_seconds: 127, attempts: 2 }], events: [{ time: '2026-09-20T00:00:00Z', account_id: 7, phase: 'harvest', result: 'ready', state_bytes: 292, duration_ms: 1200 }] });
+  await settle();
+  await h.runtime.refreshStatus();
+  const flatten = node => [node.textContent, ...node.children.flatMap(flatten)].join(' ');
+  const rendered = Array.from(h.elements.values()).map(flatten).join(' ');
+  assert.doesNotMatch(rendered, /[\u3400-\u9fff]/);
+  assert.match(rendered, /Host connected/);
+  assert.match(rendered, /2 min 7 sec/);
+  h.runtime.stop();
+});
 
 test('passive status refresh preserves unsaved form and never invokes test or save', async () => {
   const h = uiHarness(); await settle();

@@ -15,9 +15,9 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugin"
-VERSION = "0.3.2"
-PLUGIN_ID = "io.github.wangyunjeff.sub2api-state-kit"
-KEY_ID = "state-kit-release-v1"
+VERSION = "0.3.3-jisudeng.1"
+PLUGIN_ID = "com.jisudeng.sub2api-state-kit"
+KEY_ID = "jisudeng-state-kit-release-v1"
 PLATFORMS = ("linux-amd64", "linux-arm64", "darwin-arm64")
 
 
@@ -40,6 +40,33 @@ def public_der(openssl: str, key: Path) -> bytes:
     if len(der) != 44 or der[:12] != bytes.fromhex("302a300506032b6570032100"):
         raise ValueError("Signing key must be Ed25519")
     return der
+
+
+def openssl_supports_rawin(openssl: str) -> bool:
+    result = subprocess.run([openssl, "pkeyutl", "-help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    return "-rawin" in result.stdout
+
+
+def ed25519_sign(openssl: str, key: Path, payload: Path, signature: Path):
+    if openssl_supports_rawin(openssl):
+        run([openssl, "pkeyutl", "-sign", "-inkey", str(key), "-rawin", "-in", str(payload), "-out", str(signature)])
+        return
+    node = shutil.which("node")
+    if not node:
+        raise RuntimeError("Ed25519 signing requires OpenSSL with -rawin or Node.js")
+    source = "const f=require('fs'),c=require('crypto');f.writeFileSync(process.argv[3],c.sign(null,f.readFileSync(process.argv[2]),f.readFileSync(process.argv[1])))"
+    run([node, "-e", source, str(key), str(payload), str(signature)])
+
+
+def ed25519_verify(openssl: str, public_der_file: Path, payload: Path, signature: Path):
+    if openssl_supports_rawin(openssl):
+        run([openssl, "pkeyutl", "-verify", "-pubin", "-inkey", str(public_der_file), "-keyform", "DER", "-rawin", "-in", str(payload), "-sigfile", str(signature)])
+        return
+    node = shutil.which("node")
+    if not node:
+        raise RuntimeError("Ed25519 verification requires OpenSSL with -rawin or Node.js")
+    source = "const f=require('fs'),c=require('crypto');const k=c.createPublicKey({key:f.readFileSync(process.argv[1]),format:'der',type:'spki'});process.exit(c.verify(null,f.readFileSync(process.argv[2]),k,f.readFileSync(process.argv[3]))?0:1)"
+    run([node, "-e", source, str(public_der_file), str(payload), str(signature)])
 
 
 def verify(package: Path, public: Path, openssl: str):
@@ -65,7 +92,7 @@ def verify(package: Path, public: Path, openssl: str):
         (d / "public.der").write_bytes(bytes.fromhex("302a300506032b6570032100") + raw_key)
         (d / "manifest.json").write_bytes(manifest_bytes)
         (d / "signature.bin").write_bytes(base64.b64decode(signature["signature"], validate=True))
-        run([openssl, "pkeyutl", "-verify", "-pubin", "-inkey", str(d / "public.der"), "-keyform", "DER", "-rawin", "-in", str(d / "manifest.json"), "-sigfile", str(d / "signature.bin")])
+        ed25519_verify(openssl, d / "public.der", d / "manifest.json", d / "signature.bin")
     print(json.dumps({"verified": True, "plugin_id": manifest["id"], "version": manifest["version"], "platforms": list(manifest["runtimes"]), "payload_files": len(manifest["files"])}, ensure_ascii=False))
 
 
@@ -91,13 +118,18 @@ def source_archive(destination: Path):
                           "- [安装与使用](docs/plugin.md)\n"
                           "- [插件开发与测试](plugin/README.md)\n"
                           "- [验证范围](docs/plugin-validation.md)\n\n"
-                          "完整宿主版与增量版：https://github.com/wangyunjeff/sub2api-state-kit\n").encode()
+                          "维护仓库：https://github.com/tqytwe/sub2api-state-kit\n").encode()
     write_zip(destination, files)
 
 
 def build(args):
     key = args.private_key.expanduser().resolve()
-    if key.is_relative_to(ROOT):
+    try:
+        key.relative_to(ROOT)
+        key_in_repository = True
+    except ValueError:
+        key_in_repository = False
+    if key_in_repository:
         raise ValueError("Keep the release signing private key OUTSIDE the source repository")
     if key.stat().st_mode & 0o077:
         raise ValueError("Signing private key must be readable only by its owner (chmod 600)")
@@ -125,9 +157,8 @@ def build(args):
                     raise ValueError("Unexpected UI payload: " + str(path))
                 files[str(path.relative_to(PLUGIN))] = path.read_bytes()
         manifest = {
-            "schema_version": 1, "id": PLUGIN_ID, "name": "STATE Kit · 账号级票据",
-            "version": VERSION, "description": "按账号启用的 Pro / Team STATE 管理，动态代理采集、固定代理复验、续期与异常守护。",
-            "author": "wangyunjeff / Sub2API STATE Kit",
+            "schema_version": 1, "id": PLUGIN_ID, "name": "STATE Kit",
+            "version": VERSION, "author": "Jisudeng",
             "requires": {"sub2api": ">=0.2.7 <0.3.0", "recommended_sub2api_version": "0.2.7", "tested_sub2api_versions": ["0.2.7"], "plugin_protocol": 1, "transport_api": 1, "ui_bridge": 1},
             "capabilities": [{"id": "openai.oauth.outbound_transport.v1", "platform": "openai", "account_type": "oauth"}],
             "runtimes": runtimes, "ui": {"entrypoint": "ui/index.html"},
@@ -135,7 +166,7 @@ def build(args):
         }
         files["manifest.json"] = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode()
         (d / "manifest.json").write_bytes(files["manifest.json"])
-        run([args.openssl, "pkeyutl", "-sign", "-inkey", str(key), "-rawin", "-in", str(d / "manifest.json"), "-out", str(d / "signature.bin")])
+        ed25519_sign(args.openssl, key, d / "manifest.json", d / "signature.bin")
         files["signature.json"] = (json.dumps({"algorithm": "ed25519", "key_id": KEY_ID, "signature": base64.b64encode((d / "signature.bin").read_bytes()).decode()}, indent=2) + "\n").encode()
         package = output / f"sub2api-state-kit_plugin_v{VERSION}.s2plugin"
         write_zip(package, files)

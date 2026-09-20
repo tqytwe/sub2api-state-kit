@@ -1,4 +1,4 @@
 # Merge this block into the existing Sub2API config; keep other settings.
 plugins:
   trusted_publishers:
-    state-kit-release-v1: "MGeztZt8xeQAikuzJG9+fdADZmioulH5Ls2Baom1ATA="
+    jisudeng-state-kit-release-v1: "gOmq1bdG5kWsA6xe1Oho8L/9FWLfxOeVghA6BN50viM="
